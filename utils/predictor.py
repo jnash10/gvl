@@ -49,6 +49,8 @@ class GVLPredictor:
         shuffled_indices = list(range(1, len(frames)))
         random.shuffle(shuffled_indices)
 
+        shuffled_indices = [0] + shuffled_indices
+
         # Create shuffled sequence
         shuffled_frames = [frames[i] for i in shuffled_indices]
 

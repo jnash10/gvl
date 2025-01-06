@@ -30,6 +30,12 @@ if __name__ == "__main__":
     parser.add_argument("video_path", help="Path to the video file.")
     parser.add_argument("--width", type=int, help="Width to resize frames to.")
     parser.add_argument("--height", type=int, help="Height to resize frames to.")
+    parser.add_argument(
+        "--num",
+        type=int,
+        default=30,
+        help="Number of frames to extract from the video.",
+    )
     args = parser.parse_args()
 
     if not args.video_path:
@@ -37,4 +43,6 @@ if __name__ == "__main__":
             "Usage: python extract_frames.py <video_path> [--width WIDTH --height HEIGHT]"
         )
     else:
-        extract_frames(args.video_path, width=args.width, height=args.height)
+        extract_frames(
+            args.video_path, width=args.width, height=args.height, num_frames=args.num
+        )

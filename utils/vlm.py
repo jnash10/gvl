@@ -1,23 +1,31 @@
 import anthropic
 import openai
+import google.generativeai as genai
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional, Dict
 from PIL import Image
 import time
 import matplotlib.pyplot as plt
 
+import dotenv
+import os
+
+dotenv.load_dotenv()
+sleep_time = int(os.environ["SLEEP_TIME"])
+
 
 class VLMBase(ABC):
     """Base class for VLM implementations with auto-regressive prediction."""
 
     def __init__(self):
-        self.base_prompt = """You are an expert roboticist tasked to predict task completion percentages for frames of a robot for the task of {task_description}.
-The task completion percentages are between 0 and 100, where 100 corresponds to full task completion. Note that these frames are in random order, so please pay attention to the individual frames when reasoning about task completion percentage.
+        self.base_prompt = """You are an expert roboticist tasked to predict task completion percentages for frames from a video of a robot for the task of {task_description}.
+The task completion percentages are between 0 and 100, where 100 corresponds to full task completion. Note that these frames are in random order, so please pay attention to the individual frames when reasoning about task completion percentage. 
+Since they are in random order, the first frame is provided as a reference. Fruther, you can see the previous predictions. Due to random order, the task completion percentages for the frames will not be monotonically increasing.
 
 Initial robot scene: [Initial Frame]
 In the initial robot scene, the task completion percentage is 0.
 
-Now, for the task of {task_description}, I will show you all frames in a randomly shuffled order. Previous predictions for some frames are provided.
+Now, for the task of {task_description}, I will show you all frames in a randomly shuffled order. Prediction you made till now are provided.
 Your task is to predict the completion percentage for Frame {current_frame_idx}.
 
 {all_frames_prompt}
@@ -78,7 +86,7 @@ Frame {current_frame_idx}: Frame Description: [Description], Task Completion Per
             )
 
             # Get prediction for current frame
-            pred = self.get_single_prediction(
+            pred, response_text = self.get_single_prediction_and_text(
                 current_frame=shuffled_frames[i],
                 all_frames=shuffled_frames,
                 initial_frame=initial_frame,
@@ -86,23 +94,27 @@ Frame {current_frame_idx}: Frame Description: [Description], Task Completion Per
                 current_idx=i,
             )
             predictions[i] = pred
-            print(pred)
-            plt.imshow(shuffled_frames[i])
+            print("prediction", pred)
+            fig, ax = plt.subplots()
+            ax.imshow(shuffled_frames[i])
+            ax.set_title(f"Frame {i+1}: {pred:.1f}%")
+            ax.set_xlabel(response_text)
+            plt.show()
 
             # Sleep for a bit to avoid rate limiting
-            time.sleep(10)
+            time.sleep(sleep_time)
 
         return predictions
 
     @abstractmethod
-    def get_single_prediction(
+    def get_single_prediction_and_text(
         self,
         current_frame: Image.Image,
         all_frames: List[Image.Image],
         initial_frame: Image.Image,
         prompt: str,
         current_idx: int,
-    ) -> float:
+    ) -> Tuple[float, str]:
         """Get prediction for a single frame. To be implemented by child classes."""
         pass
 
@@ -112,7 +124,7 @@ class ClaudeVLM(VLMBase):
         super().__init__()
         self.client = anthropic.Anthropic()
 
-    def get_single_prediction(
+    def get_single_prediction_and_text(
         self,
         current_frame: Image.Image,
         all_frames: List[Image.Image],
@@ -166,13 +178,15 @@ class ClaudeVLM(VLMBase):
 
         messages = [{"role": "user", "content": content}]
 
+        print(content)
+
         response = self.client.messages.create(
-            model="claude-3-haiku-20240307", max_tokens=100, messages=messages
+            model="claude-3-5-sonnet-20241022", max_tokens=100, messages=messages
         )
 
         try:
             response_text = response.content[0].text.strip()
-            print(response_text)
+            # print(response_text)
             percentage_str = (
                 response_text.split("Task Completion Percentages:")[-1]
                 .strip()
@@ -180,7 +194,9 @@ class ClaudeVLM(VLMBase):
             )
             prediction = float(percentage_str)
             print("current index", current_idx, "prediction", prediction)
-            return prediction
+
+            return prediction, response_text
+
         except ValueError:
             print(f"Warning: Could not parse prediction: {response.content[0].text}")
             # extract number from response
@@ -191,10 +207,10 @@ class ClaudeVLM(VLMBase):
 
             try:
                 prediction = float(percentage_str[0])
-                return prediction
+                return prediction, response_text
 
             except:
-                return 50.0
+                return 50.0, "could not parse prediction"
 
     @staticmethod
     def _image_to_base64(image: Image.Image) -> str:
@@ -212,7 +228,7 @@ class OpenAIVLM(VLMBase):
         super().__init__()
         self.client = openai.OpenAI(api_key=api_key)
 
-    def get_single_prediction(
+    def get_single_prediction_and_text(
         self,
         current_frame: Image.Image,
         all_frames: List[Image.Image],
@@ -263,7 +279,8 @@ class OpenAIVLM(VLMBase):
         # Add final text
         if remaining_text:
             content.append({"type": "text", "text": remaining_text})
-            # print(remaining_text)
+            print(remaining_text)
+        # print(content)
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -279,10 +296,67 @@ class OpenAIVLM(VLMBase):
             )
             prediction = float(percentage_str)
             print("current index", current_idx, "prediction", prediction)
-            return prediction
+            # print(response_text)
+            return prediction, response_text
         except Exception as e:
             print(f"Warning: Error getting prediction: {str(e)}")
-            return 50.0
+            return 50.0, "could not parse prediction"
+
+    @staticmethod
+    def _image_to_base64(image: Image.Image) -> str:
+        """Convert PIL Image to base64 string."""
+        import io
+        import base64
+
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        return base64.b64encode(buffered.getvalue()).decode()
+
+
+class GeminiVLM(VLMBase):
+    def __init__(self, api_key: str):
+        super().__init__()
+        self.api_key = api_key
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model_name="gemini-2.0-flash-exp")
+
+    def get_single_prediction_and_text(
+        self,
+        current_frame: Image.Image,
+        all_frames: List[Image.Image],
+        initial_frame: Image.Image,
+        prompt: str,
+        current_idx: int,
+    ) -> float:
+        # Build content list with all images and text
+        content = [prompt, initial_frame] + all_frames
+
+        try:
+            response = self.model.generate_content(content)
+            response_text = response.text.strip()
+            percentage_str = (
+                response_text.split("Task Completion Percentages:")[-1]
+                .strip()
+                .rstrip("%")
+            )
+            prediction = float(percentage_str)
+            print("current index", current_idx, "prediction", prediction)
+
+            return prediction, response_text
+
+        except ValueError:
+            print(f"Warning: Could not parse prediction: {response.text}")
+            import re
+
+            response_text = response.text.strip()
+            percentage_str = re.findall(r"\d+", response_text)
+
+            try:
+                prediction = float(percentage_str[0])
+                return prediction, response_text
+
+            except:
+                return 50.0, "could not parse prediction"
 
     @staticmethod
     def _image_to_base64(image: Image.Image) -> str:

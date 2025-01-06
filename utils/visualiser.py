@@ -51,7 +51,7 @@ class GVLVisualizer:
         # Plot shuffled predictions
         ax2.plot(
             range(len(frames)),
-            [0] + shuffled_predictions,
+            shuffled_predictions,
             "r-",
             label="Predicted Progress (Shuffled Order)",
         )
