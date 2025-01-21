@@ -27,7 +27,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Extract frames from a video.")
-    parser.add_argument("video_path", help="Path to the video file.")
+    parser.add_argument("--video_path", type=str, help="Path to the video file.")
+    parser.add_argument("vid_directory", type=str, help="Path to the video directory.")
     parser.add_argument("--width", type=int, help="Width to resize frames to.")
     parser.add_argument("--height", type=int, help="Height to resize frames to.")
     parser.add_argument(
@@ -38,7 +39,18 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if not args.video_path:
+    if args.vid_directory:
+        for vid in os.listdir(args.vid_directory):
+            if vid.endswith(".mp4"):
+                video_path = os.path.join(args.vid_directory, vid)
+                extract_frames(
+                    video_path,
+                    width=args.width,
+                    height=args.height,
+                    num_frames=args.num,
+                )
+
+    elif not args.video_path:
         print(
             "Usage: python extract_frames.py <video_path> [--width WIDTH --height HEIGHT]"
         )
